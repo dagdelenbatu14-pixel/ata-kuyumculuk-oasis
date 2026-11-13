@@ -16,9 +16,11 @@ const tour = document.querySelector('.tour');
 const labelBox = document.getElementById('labels');
 const navBtns = [...document.querySelectorAll('.tour-nav button')];
 const nav = document.querySelector('.tour-nav');
+const stopEls = [...document.querySelectorAll('.stop')];
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(devicePixelRatio, mobile ? 1.5 : 2));
+let dpr = Math.min(devicePixelRatio, 1.5);   // 2x retina doubled the pixel cost for no visible gain on a dark scene
+renderer.setPixelRatio(dpr);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 
@@ -41,9 +43,10 @@ const rim = new THREE.DirectionalLight('#c9d8ff', 1.1); rim.position.set(-5, 2, 
 /* ---------- materials ---------- */
 const gold = new THREE.MeshPhysicalMaterial({ color: '#e9b54d', metalness: 1, roughness: .17, envMapIntensity: 1.3 });
 const whiteGold = new THREE.MeshPhysicalMaterial({ color: '#dedcd6', metalness: 1, roughness: .13, envMapIntensity: 1.3 });
+// mirror-polished facets + iridescent fire: reads as a diamond and costs no extra render pass (transmission did)
 const diamond = new THREE.MeshPhysicalMaterial({
-  color: '#ffffff', metalness: 0, roughness: 0, transmission: 1, thickness: .7, ior: 2.42,
-  dispersion: 4, iridescence: .5, iridescenceIOR: 1.6, specularIntensity: 1, envMapIntensity: 2.6, flatShading: true
+  color: '#f3f6ff', metalness: 1, roughness: .02, iridescence: 1, iridescenceIOR: 1.8,
+  iridescenceThicknessRange: [200, 900], envMapIntensity: 3.2, flatShading: true
 });
 const plinthMat = new THREE.MeshStandardMaterial({ color: '#070504', metalness: .2, roughness: .55, envMapIntensity: .25 });
 const glowMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#f3c977').multiplyScalar(2.2), toneMapped: false });
@@ -202,22 +205,20 @@ const hands = {};
   hands.h = hand(.52, .06, gold, .17); hands.m = hand(.78, .04, gold, .18);
   hands.s = hand(.84, .012, new THREE.MeshStandardMaterial({ color: '#e8857a', metalness: .6, roughness: .3 }), .19);
   const cap = new THREE.Mesh(new THREE.CylinderGeometry(.05, .05, .04, 24), gold); cap.rotation.x = Math.PI / 2; cap.position.z = .2; watch.add(cap);
-  const glass = new THREE.Mesh(new THREE.CircleGeometry(.93, 64), new THREE.MeshPhysicalMaterial({ transmission: 1, roughness: 0, thickness: .05, ior: 1.5, transparent: true, opacity: .25 }));
-  glass.position.z = .215; watch.add(glass);
   const crown = new THREE.Mesh(new THREE.CylinderGeometry(.09, .09, .16, 24), gold); crown.rotation.z = Math.PI / 2; crown.position.x = 1.08; watch.add(crown);
   const linkGeo = new RoundedBoxGeometry(.62, .2, .14, 3, .04);
   const strap = new THREE.InstancedMesh(linkGeo, gold, 22), m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
   for (let k = 0; k < 11; k++) for (const sg of [1, -1]) {
-    const y = sg * (1.02 + k * .21), z = -.025 * k * k;
-    q.setFromEuler(e.set(-sg * k * .11, 0, 0));
+    const y = sg * (1.02 + k * .21), z = -.012 * k * k;
+    q.setFromEuler(e.set(-sg * k * .05, 0, 0));
     strap.setMatrixAt(k * 2 + (sg > 0 ? 0 : 1), m.compose(new THREE.Vector3(0, y, z - .02), q, new THREE.Vector3(1, 1, 1)));
   }
   watch.add(strap);
-  watch.rotation.set(-.12, -.25, 0);
+  watch.rotation.set(-.08, -.12, 0);
 }
 const watchHolder = station(4, watch, [[[0, .6, .2], 'Kadran'], [[1.16, 0, 0], 'Kurma kolu'], [[0, -1.8, -.4], 'Kordon']]);
 
-watchHolder.children[1].visible = false;   // the bracelet would cut through the plinth; keep only the halo
+watchHolder.children[1].visible = watchHolder.children[2].visible = false;   // the bracelet would cut through the plinth
 
 /* thumbnail-only: ribbed cuff (kaburga kelepçe) */
 const cuff = new THREE.Group();
@@ -300,21 +301,22 @@ function updateLabels(s) {
 }
 
 /* ---------- scroll -> station ---------- */
+const GAP = .85;   // keep in sync with --gap in styles.css
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 function station01() {
   const r = tour.getBoundingClientRect(), vh = innerHeight;
-  const raw = Math.min(6, Math.max(0, -r.top / vh));
+  const raw = Math.min(6, Math.max(0, -r.top / (vh * GAP)));
   const seg = Math.min(5, Math.floor(raw)), e = smooth(.12, .78, raw - seg);
   return { s: seg + e, seg, e };
 }
 navBtns.forEach(b => b.addEventListener('click', () => {
-  const y = tour.offsetTop + (+b.dataset.i + .15) * innerHeight;
+  const y = tour.offsetTop + (+b.dataset.i + .15) * innerHeight * GAP;
   window.lenis ? window.lenis.scrollTo(y, { duration: 1.6 }) : scrollTo({ top: y, behavior: 'smooth' });
 }));
 
 /* pointer: parallax + click an object to fly there */
 const mouse = new THREE.Vector2(), ease = new THREE.Vector2();
-const ray = new THREE.Raycaster(), cursor = document.getElementById('cursor');
+const ray = new THREE.Raycaster();
 addEventListener('pointermove', e => { mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); });
 function pick(e) {
   const r = canvas.getBoundingClientRect();
@@ -323,10 +325,19 @@ function pick(e) {
   while (o && !stations.some(s => s.group === o)) o = o.parent;
   return o ? stations.findIndex(s => s.group === o) : -1;
 }
-canvas.parentElement.addEventListener('pointermove', e => { if (cursor && !mobile) cursor.classList.toggle('big', pick(e) >= 0); });
 canvas.parentElement.addEventListener('click', e => { const i = pick(e); if (i >= 0) navBtns[i]?.click(); });
 
 /* ---------- loop ---------- */
+let bloomOn = !!composer, slow = 0, lastT = performance.now();
+function adapt() {
+  const now = performance.now(), dt = now - lastT; lastT = now;
+  if (dt > 100) return;                      // tab switch or scroll jump, not a slow frame
+  slow = dt > 24 ? slow + 1 : Math.max(0, slow - 1);
+  if (slow < 40) return;
+  slow = 0;
+  if (dpr > 1) { dpr = Math.max(1, dpr - .25); renderer.setPixelRatio(dpr); composer?.setPixelRatio(dpr); resize(); }
+  else if (bloomOn) bloomOn = false;
+}
 const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), clock = new THREE.Clock();
 let visible = true, first = true;
 new IntersectionObserver(([en]) => { visible = en.isIntersecting; }).observe(tour);
@@ -345,7 +356,7 @@ function frame() {
   const k = 1 - smooth(5, 6, s);
   camera.setViewOffset(W, H, offs[0] * k, offs[1] * k, W, H);
 
-  stations.forEach((st, i) => { st.group.rotation.y = Math.sin(t * .35 + i) * .35 + (s - (i + 1)) * .9; });
+  stations.forEach((st, i) => { st.group.rotation.y = Math.sin(t * .35 + i) * (st.group === watch ? .15 : .35) + (s - (i + 1)) * .9; });
   chain.userData.heart.rotation.y = Math.sin(t * 1.3) * .4;
   const now = new Date(), hh = now.getHours() % 12 + now.getMinutes() / 60, mm = now.getMinutes() + now.getSeconds() / 60, ss = now.getSeconds() + now.getMilliseconds() / 1000;
   hands.h.rotation.z = -hh / 12 * Math.PI * 2; hands.m.rotation.z = -mm / 60 * Math.PI * 2; hands.s.rotation.z = -ss / 60 * Math.PI * 2;
@@ -355,20 +366,23 @@ function frame() {
   navBtns.forEach(b => b.setAttribute('aria-current', String(+b.dataset.i === cur)));
   if (nav) nav.style.opacity = s > .5 && s < 5.6 ? 1 : 0;
   updateLabels(s);
+  // only the current stop's text is shown, so a tall panel never bleeds into the next station
+  stopEls.forEach((el, i) => { el.style.opacity = reduce ? 1 : Math.max(0, 1 - Math.abs(s - i) * 2.4); });
 
-  composer ? composer.render() : renderer.render(scene, camera);
+  composer && bloomOn ? composer.render() : renderer.render(scene, camera);
+  adapt();
   if (first) { first = false; document.documentElement.classList.add('ready'); }
 }
 frame();
 
 /* ---------- collection thumbnails rendered from this scene (second, offscreen context) ---------- */
 const SHOTS = {
-  ring: [ring, [-.9, .5, 7.4], [0, .45, 0], 1.6],
+  ring: [ring, [-.9, .5, 6.2], [0, .45, 0], 1.6],
   bands: [bands, [0, .4, 5.4], [0, -.05, 0], 1],
   bangle: [bangle, [0, .8, 6.2], [0, -.35, 0], 1],
   chain: [chain, [0, -.3, 5.2], [0, -.35, 0], 1],
   watch: [watch, [1.2, .2, 5.6], [0, -.2, 0], 1],
-  cuff: [cuff, [0, .3, 6.6], [0, .05, 0], 1.6]
+  cuff: [cuff, [0, .3, 3.9], [0, .05, 0], 1.6]
 };
 async function thumbs() {
   const cards = [...document.querySelectorAll('.card[data-shot]')];
@@ -393,12 +407,17 @@ async function thumbs() {
     scene.environment = envB; off.render(scene, cam); scene.environment = env;
     obj.rotation.y = ry;
     vis.forEach(([o, v]) => { o.visible = v; }); cuff.visible = false;
-    const img = card.querySelector('img');
-    img.onload = () => img.classList.add('ok');
-    img.src = off.domElement.toDataURL('image/webp', .9);
+    await fetch('http://127.0.0.1:8766/' + card.dataset.shot + '.webp', { method: 'POST', body: off.domElement.toDataURL('image/webp', .86) });
     await new Promise(r => setTimeout(r, 40));
   }
   off.dispose();
 }
-(window.requestIdleCallback || (f => setTimeout(f, 600)))(() => setTimeout(thumbs, 700));
-window.__gold = { scene, camera, stations };
+// cards ship pre-rendered webp files; ?shots=1 re-renders them and posts each to a local sink on :8766
+if (new URLSearchParams(location.search).has('shots')) setTimeout(thumbs, 1500);
+window.__gold = { scene, camera, stations, renderer };
+// dev check: average GPU+CPU ms per frame, synchronous so it works even when the tab's timers are throttled
+window.__bench = (n = 20) => {
+  const gl = renderer.getContext(), px = new Uint8Array(4), t0 = performance.now();
+  for (let k = 0; k < n; k++) { composer ? composer.render() : renderer.render(scene, camera); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); }
+  return +((performance.now() - t0) / n).toFixed(1);
+};

@@ -5,7 +5,7 @@
   if (reduce) root.classList.add('rm');
   if ('scrollRestoration' in history) history.scrollRestoration = 'manual';   // the tour must start at the hero
   if (!location.hash) scrollTo(0, 0);
-  setTimeout(() => root.classList.add('ready'), 3200);   // never keep the veil if WebGL is slow or missing
+  setTimeout(() => root.classList.add('ready'), 2000);   // never keep the veil if WebGL is slow or missing
 
   /* ---------- measurement queue (no analytics loaded in the demo) ---------- */
   window.dataLayer = window.dataLayer || [];
@@ -34,13 +34,19 @@
     wrap(h);
     h.querySelectorAll('.w').forEach(w => w.setAttribute('aria-hidden', 'true'));
   });
-  document.querySelectorAll('main section :is(.lede-s, .note, .board, .card, .g-wrap, address, .facts, .acts, .ig-link, .eyebrow), .stop :is(.txt, .lede, .chips, .acts, .num, .eyebrow)').forEach((el, i) => {
+  document.querySelectorAll('main section :is(.lede-s, .note, .board, .card, .g-wrap, address, .facts, .acts, .ig-link, .eyebrow)').forEach((el, i) => {
     el.classList.add('rv'); el.style.setProperty('--d', (i % 4) * 90 + 'ms');
   });
   const io = new IntersectionObserver(es => es.forEach(e => {
     e.target.classList.toggle('in', e.isIntersecting || e.target.classList.contains('in') && !e.target.closest('.stop'));
   }), { rootMargin: '0px 0px -10% 0px' });
   document.querySelectorAll('.split, .rv').forEach(el => io.observe(el));
+
+  /* ---------- card images fade in once decoded ---------- */
+  document.querySelectorAll('.card img').forEach(img => {
+    const ok = () => img.classList.add('ok');
+    img.complete && img.naturalWidth ? ok() : img.addEventListener('load', ok);
+  });
 
   /* ---------- bar ---------- */
   const bar = document.getElementById('bar');
@@ -93,14 +99,27 @@
 
   /* ---------- moments: vertical scroll drives a horizontal track ---------- */
   const mSec = document.querySelector('.moments'), mTrack = document.getElementById('mTrack');
+  // layout is read once per resize, not every frame
+  let mOn = false, mMax = 0, mCenters = [], mLast = -1;
+  const mMeasure = () => {
+    mTrack.style.transform = 'none';
+    mMax = Math.max(0, mTrack.scrollWidth - innerWidth);
+    mCenters = [...mTrack.children].map(li => li.offsetLeft + li.offsetWidth / 2);
+    mLast = -1;
+  };
+  if (mSec && !reduce) {
+    new IntersectionObserver(([e]) => { mOn = e.isIntersecting; }).observe(mSec);
+    addEventListener('resize', mMeasure); mMeasure();
+  }
   const mFrame = () => {
-    if (reduce || !mSec) return;
-    const r = mSec.getBoundingClientRect(), span = mSec.offsetHeight - innerHeight;
-    const p = Math.min(1, Math.max(0, -r.top / span));
-    const max = mTrack.scrollWidth - innerWidth;
-    mTrack.style.transform = `translate3d(${-p * Math.max(0, max)}px,0,0)`;
+    if (!mOn) return;
+    const p = Math.min(1, Math.max(0, -mSec.getBoundingClientRect().top / (mSec.offsetHeight - innerHeight)));
+    if (Math.abs(p - mLast) < .0005) return;
+    mLast = p;
+    const x = p * mMax;
+    mTrack.style.transform = `translate3d(${-x}px,0,0)`;
     [...mTrack.children].forEach((li, i) => {
-      const c = li.getBoundingClientRect(), q = (c.left + c.width / 2) / innerWidth - .5;
+      const q = (mCenters[i] - x) / innerWidth - .5;
       li.style.opacity = String(1 - Math.min(.55, Math.abs(q) * .7));
     });
   };
@@ -158,7 +177,7 @@
   /* ---------- smooth scroll ---------- */
   const loop = t => { window.lenis?.raf(t); mFrame(); requestAnimationFrame(loop); };
   if (!reduce && window.Lenis) {
-    window.lenis = new Lenis({ lerp: .08, smoothWheel: true });
+    window.lenis = new Lenis({ lerp: .12, smoothWheel: true });
     document.querySelectorAll('a[href^="#"]').forEach(a => a.addEventListener('click', e => {
       const t = document.querySelector(a.getAttribute('href'));
       if (t) { e.preventDefault(); window.lenis.scrollTo(t, { offset: a.getAttribute('href') === '#ust' ? 0 : -60, duration: 1.6 }); }
